@@ -265,3 +265,99 @@ app.post('/register', async (req, res) => {
 
 // ─── START ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`✅  Serveur démarré sur http://localhost:${PORT}`));
+
+// ─── POST /emplacement/ajouter ────────────────────────────────────────────────
+app.post('/emplacement/ajouter', async (req, res) => {
+  const { libelle, code_postal, latitude, longitude } = req.body;
+  if (!libelle || !code_postal || latitude == null || longitude == null)
+    return res.status(400).json({ success: false, message: "Champs manquants" });
+  try {
+    const result = await query(
+      "INSERT INTO emplacement (code_postal, libelle, latitude, longitude) VALUES (?, ?, ?, ?)",
+      [code_postal, libelle, latitude, longitude]
+    );
+    res.json({ success: true, id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+// ─── POST /contenant/ajouter ──────────────────────────────────────────────────
+app.post('/contenant/ajouter', async (req, res) => {
+  const { capacite_kg, poids_actuel_kg, Id_type_dechet, Id_emplacement, scelle } = req.body;
+  if (!capacite_kg || !Id_type_dechet || !Id_emplacement)
+    return res.status(400).json({ success: false, message: "Champs manquants" });
+  try {
+    const result = await query(
+      `INSERT INTO contenant (capacite_kg, poids_actuel_kg, scelle, date_creation, Id_type_dechet, Id_emplacement)
+       VALUES (?, ?, ?, NOW(), ?, ?)`,
+      [capacite_kg, poids_actuel_kg || 0, scelle ? 1 : 0, Id_type_dechet, Id_emplacement]
+    );
+    res.json({ success: true, id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+// ─── POST /contenant/assigner ─────────────────────────────────────────────────
+app.post('/contenant/assigner', async (req, res) => {
+  const { Id_contenant, Id_emplacement } = req.body;
+  if (!Id_contenant || !Id_emplacement)
+    return res.status(400).json({ success: false, message: "Champs manquants" });
+  try {
+    await query(
+      "UPDATE contenant SET Id_emplacement = ? WHERE Id_contenant = ?",
+      [Id_emplacement, Id_contenant]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+// ─── GET /transferts/all (admin) ──────────────────────────────────────────────
+app.get('/transferts/all', async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        t.Id_transfert,
+        t.date_demande,
+        t.date_debut,
+        t.date_fin,
+        CASE
+          WHEN t.date_fin IS NOT NULL THEN 'terminé'
+          WHEN t.date_debut <= NOW()  THEN 'en cours'
+          ELSE                             'en attente'
+        END AS statut,
+        v.matricule,
+        v.type_vehicule,
+        v.capacite_kg,
+        v.capacite_m2,
+        c.Id_centre,
+        c.adresse     AS centre_adresse,
+        c.ville       AS centre_ville,
+        c.code_postal AS centre_code_postal,
+        c.latitude    AS centre_latitude,
+        c.longitude   AS centre_longitude,
+        u.login       AS conducteur_login
+      FROM transfert t
+      JOIN vehicule          v ON t.matricule  = v.matricule
+      JOIN centre_traitement c ON t.Id_centre  = c.Id_centre
+      JOIN utilisateur       u ON t.Id_utilisateur = u.Id_utilisateur
+      ORDER BY
+        CASE
+          WHEN t.date_fin IS NOT NULL THEN 2
+          WHEN t.date_debut <= NOW()  THEN 0
+          ELSE                             1
+        END,
+        t.date_debut DESC
+    `;
+    res.json(await query(sql));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
