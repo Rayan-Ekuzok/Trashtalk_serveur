@@ -21,7 +21,7 @@ function getSalt() {
   return "lOPZf76r6otfg8P7R6'0è_guighUYd5oR_yhÔ%ug7Y6";
 }
 
-// ─── HELPER : ouvre, query, ferme ─────────────────────────────────────────────
+// ─── HELPER ───────────────────────────────────────────────────────────────────
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
     const con = mysql.createConnection(DB_CONFIG);
@@ -54,6 +54,54 @@ app.get('/utilisateur/admin', async (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: "Erreur SQL" }); }
 });
 
+// ─── GET /conducteur/transferts/:id ──────────────────────────────────────────
+// Calcule un statut dynamique depuis les dates :
+//   - date_fin non nulle                  → "terminé"
+//   - date_debut <= maintenant, pas de fin → "en cours"
+//   - date_debut dans le futur             → "en attente"
+app.get('/conducteur/transferts/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const sql = `
+      SELECT
+        t.Id_transfert,
+        t.date_demande,
+        t.date_debut,
+        t.date_fin,
+        CASE
+          WHEN t.date_fin IS NOT NULL               THEN 'terminé'
+          WHEN t.date_debut <= NOW()                THEN 'en cours'
+          ELSE                                           'en attente'
+        END AS statut,
+        v.matricule,
+        v.type_vehicule,
+        v.capacite_kg,
+        v.capacite_m2,
+        c.Id_centre,
+        c.adresse     AS centre_adresse,
+        c.ville       AS centre_ville,
+        c.code_postal AS centre_code_postal,
+        c.latitude    AS centre_latitude,
+        c.longitude   AS centre_longitude
+      FROM transfert t
+      JOIN vehicule          v ON t.matricule  = v.matricule
+      JOIN centre_traitement c ON t.Id_centre  = c.Id_centre
+      WHERE t.Id_utilisateur = ?
+      ORDER BY
+        CASE
+          WHEN t.date_fin IS NOT NULL THEN 2
+          WHEN t.date_debut <= NOW()  THEN 0
+          ELSE                             1
+        END,
+        t.date_debut DESC
+    `;
+    res.json(await query(sql, [id]));
+  } catch (err) {
+    console.error('Erreur /conducteur/transferts :', err);
+    res.status(500).json({ success: false, message: "Erreur SQL", detail: err.message });
+  }
+});
+
 // ─── GET /signalement ─────────────────────────────────────────────────────────
 app.get('/signalement', async (req, res) => {
   try {
@@ -83,7 +131,6 @@ app.get('/signalement', async (req, res) => {
 });
 
 // ─── POST /signalement/valider ────────────────────────────────────────────────
-// Signalement correct → citoyen -1 avertissement (min 0)
 app.post('/signalement/valider', async (req, res) => {
   const { id_signalement } = req.body;
   if (!id_signalement) return res.status(400).json({ success: false, message: "id_signalement manquant" });
@@ -113,7 +160,6 @@ app.post('/signalement/valider', async (req, res) => {
 });
 
 // ─── POST /signalement/rejeter ────────────────────────────────────────────────
-// Signalement incorrect → citoyen +1 avertissement, ban si >= 5
 app.post('/signalement/rejeter', async (req, res) => {
   const { id_signalement } = req.body;
   if (!id_signalement) return res.status(400).json({ success: false, message: "id_signalement manquant" });
@@ -160,8 +206,6 @@ app.post('/login', async (req, res) => {
   if (!login || !password) return res.status(400).json({ success: false, message: "Champs manquants" });
 
   const passwordHash = sha256(password + getSalt());
-  console.log("LOGIN REÇU :", login);
-  console.log("MDP HASHÉ  :", passwordHash);
 
   try {
     const results = await query(
@@ -174,12 +218,18 @@ app.post('/login', async (req, res) => {
     const user = results[0];
     if (user.est_bannie) return res.json({ success: false, message: "Compte banni" });
 
-    // Vérifie si l'utilisateur est admin
-    const adminCheck = await query("SELECT * FROM admin WHERE Id_utilisateur = ?", [user.Id_utilisateur]);
-    const isAdmin = adminCheck.length > 0;
+    const adminCheck     = await query("SELECT * FROM admin     WHERE Id_utilisateur = ?", [user.Id_utilisateur]);
+    const conducteurCheck= await query("SELECT * FROM conducteur WHERE Id_utilisateur = ?", [user.Id_utilisateur]);
 
     const { password: _pwd, ...userSafe } = user;
-    res.json({ success: true, user: { ...userSafe, isAdmin } });
+    res.json({
+      success: true,
+      user: {
+        ...userSafe,
+        isAdmin:      adminCheck.length > 0,
+        isConducteur: conducteurCheck.length > 0
+      }
+    });
 
   } catch (err) {
     console.error(err);
