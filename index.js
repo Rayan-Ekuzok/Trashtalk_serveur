@@ -75,7 +75,8 @@ function adminMiddleware(req, res, next) {
 }
 
 // ─── GET PUBLICS (lecture seule, pas de JWT requis) ───────────────────────────
-['emplacement', 'type_dechet'].forEach(table => {
+// contenant est public pour permettre la carte sans connexion
+['emplacement', 'type_dechet', 'contenant'].forEach(table => {
   app.get(`/${table}`, async (req, res) => {
     try { res.json(await query(`SELECT * FROM ${table}`)); }
     catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
@@ -83,11 +84,39 @@ function adminMiddleware(req, res, next) {
 });
 
 // ─── GET PROTÉGÉS ─────────────────────────────────────────────────────────────
-['lot', 'contenant', 'utilisateur'].forEach(table => {
+['lot', 'utilisateur'].forEach(table => {
   app.get(`/${table}`, authMiddleware, async (req, res) => {
     try { res.json(await query(`SELECT * FROM ${table}`)); }
     catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
   });
+});
+
+// ─── POST /signalement/creer ──────────────────────────────────────────────────
+// Accessible à tout utilisateur connecté
+app.post('/signalement/creer', authMiddleware, async (req, res) => {
+  const { text, Id_emplacement } = req.body;
+  if (!text || !Id_emplacement)
+    return res.status(400).json({ success: false, message: "Texte et emplacement requis" });
+
+  const Id_utilisateur_1 = req.user.Id_utilisateur;
+
+  try {
+    const admins = await query("SELECT Id_utilisateur FROM admin LIMIT 1");
+    if (admins.length === 0)
+      return res.status(500).json({ success: false, message: "Aucun admin disponible" });
+
+    const Id_admin = admins[0].Id_utilisateur;
+
+    const result = await query(
+      `INSERT INTO signalement (text, evalutaion, date_, Id_utilisateur, Id_emplacement, Id_utilisateur_1) VALUES (?, NULL, NOW(), ?, ?, ?)`,
+      [text, Id_admin, Id_emplacement, Id_utilisateur_1]
+    );
+
+    res.json({ success: true, id: result.insertId, message: "Signalement envoyé ✔" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
 });
 
 app.get('/utilisateur/conducteur', authMiddleware, async (req, res) => {
