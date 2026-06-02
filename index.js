@@ -1,30 +1,26 @@
-const express  = require('express');
-const mysql    = require('mysql');
-const cors     = require('cors');
-const sha256   = require('js-sha256');
-const jwt      = require('jsonwebtoken');
-const fs       = require('fs');
-const path     = require('path');
+const express = require('express');
+const mysql   = require('mysql');
+const cors    = require('cors');
+const sha256  = require('js-sha256');
+const jwt     = require('jsonwebtoken');
+const fs      = require('fs');
+const path    = require('path');
 
-const app  = express();
-const PORT = 3000;
+const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// ─── CONFIG ───────────────────────────────────────────────────────────────────
-const DB_CONFIG = {
-  host: "localhost", user: "root", password: "", database: "slam_projet"
-};
-
-const JWT_SECRET  = "trashtalk_jwt_secret_change_in_prod";  // → .env en prod
-const JWT_EXPIRES = "10m";
+//-----------------------------------------------------------------------
+// Config : clé JWT et sel de hashage
+const JWT_SECRET = "lhn_çyt'éfhyàç_é_yfZEHFOIZEFHZOEIFGHUZIG";
 
 function getSalt() {
   return "lOPZf76r6otfg8P7R6'0è_guighUYd5oR_yhÔ%ug7Y6";
 }
 
-// ─── LOGGER ───────────────────────────────────────────────────────────────────
+//------------------------------------------------------------------------------------
+// Logger : enregistrement des tentatives de connexion dans un fichier
 const LOG_DIR  = path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'connexions.log');
 
@@ -37,10 +33,16 @@ function logConnexion({ ip, login, success, raison }) {
   console.log(line.trim());
 }
 
-// ─── HELPER DB ────────────────────────────────────────────────────────────────
+//-------------------------------------------------------------
+// Helper DB : exécution d'une requête SQL avec une connexion temporaire
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
-    const con = mysql.createConnection(DB_CONFIG);
+    const con = mysql.createConnection({
+      host: "localhost",
+      user: "root",
+      password: "",
+      database: "slam_projet"
+    });
     con.connect(err => {
       if (err) return reject(err);
       con.query(sql, params, (err, results) => {
@@ -52,63 +54,179 @@ function query(sql, params = []) {
   });
 }
 
-// ─── MIDDLEWARE JWT ───────────────────────────────────────────────────────────
+//------------------------------------------------------------------------------
+// Middleware JWT : vérification du token Bearer dans les headers
 function authMiddleware(req, res, next) {
   const header = req.headers['authorization'];
-  if (!header || !header.startsWith('Bearer '))
+
+  if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, message: "Token manquant" });
+  }
 
   const token = header.split(' ')[1];
+
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (err) {
-    const msg = err.name === 'TokenExpiredError' ? "Session expirée" : "Token invalide";
-    return res.status(401).json({ success: false, message: msg, expired: err.name === 'TokenExpiredError' });
+    let message = "Token invalide";
+    let expired = false;
+
+    if (err.name === 'TokenExpiredError') {
+      message = "Session expirée";
+      expired = true;
+    }
+
+    return res.status(401).json({ success: false, message, expired });
   }
 }
 
+//------------------------------------------------------------------
+// Middleware Admin : vérifie que l'utilisateur connecté est admin
 function adminMiddleware(req, res, next) {
-  if (!req.user?.isAdmin)
+  if (!req.user?.isAdmin) {
     return res.status(403).json({ success: false, message: "Accès refusé" });
+  }
   next();
 }
 
-// ─── GET PUBLICS (lecture seule, pas de JWT requis) ───────────────────────────
-// contenant est public pour permettre la carte sans connexion
-['emplacement', 'type_dechet', 'contenant'].forEach(table => {
-  app.get(`/${table}`, async (req, res) => {
-    try { res.json(await query(`SELECT * FROM ${table}`)); }
-    catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
-  });
+//---------------------------------------------------------------------------------
+// GET /emplacement : retourne tous les emplacements
+app.get('/emplacement', async (req, res) => {
+  try {
+    const emplacements = await query("SELECT * FROM emplacement");
+    res.json(emplacements);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
 });
 
-// ─── GET PROTÉGÉS ─────────────────────────────────────────────────────────────
-['lot', 'utilisateur'].forEach(table => {
-  app.get(`/${table}`, authMiddleware, async (req, res) => {
-    try { res.json(await query(`SELECT * FROM ${table}`)); }
-    catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
-  });
+//--------------------------------------------------------------------
+// GET /type_dechet : retourne tous les types de déchets
+app.get('/type_dechet', async (req, res) => {
+  try {
+    const types = await query("SELECT * FROM type_dechet");
+    res.json(types);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
 });
 
-// ─── POST /signalement/creer ──────────────────────────────────────────────────
-// Accessible à tout utilisateur connecté
+//------------------------------------------------------------------------------------
+// GET /contenant : retourne tous les contenants
+app.get('/contenant', async (req, res) => {
+  try {
+    const contenants = await query("SELECT * FROM contenant");
+    res.json(contenants);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//---------------------------------------------------------------
+// GET /lot : retourne tous les lots (authentification requise)
+app.get('/lot', authMiddleware, async (req, res) => {
+  try {
+    const lots = await query("SELECT * FROM lot");
+    res.json(lots);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//--------------------------------------------------------------------------
+// GET /utilisateur : retourne tous les utilisateurs (authentification requise)
+app.get('/utilisateur', authMiddleware, async (req, res) => {
+  try {
+    const utilisateurs = await query("SELECT * FROM utilisateur");
+    res.json(utilisateurs);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//-----------------------------------------------------------------------------------
+// GET /utilisateur/conducteur : retourne tous les conducteurs
+app.get('/utilisateur/conducteur', authMiddleware, async (req, res) => {
+  try {
+    const conducteurs = await query("SELECT * FROM conducteur");
+    res.json(conducteurs);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//---------------------------------------------------------------------
+// GET /utilisateur/admin : retourne tous les admins (admin requis)
+app.get('/utilisateur/admin', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const admins = await query("SELECT * FROM admin");
+    res.json(admins);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//------------------------------------------------------------------------------
+// GET /signalement : retourne tous les signalements enrichis (admin requis)
+app.get('/signalement', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const signalements = await query(
+      `SELECT Id_signalement, text, evalutaion, date_, Id_emplacement, Id_utilisateur_1, Id_utilisateur
+       FROM signalement
+       ORDER BY date_ DESC`
+    );
+
+    for (let i = 0; i < signalements.length; i++) {
+      const sig = signalements[i];
+
+      const emplacements = await query(
+        "SELECT libelle, code_postal FROM emplacement WHERE Id_emplacement = ?",
+        [sig.Id_emplacement]
+      );
+
+      const utilisateurs = await query(
+        "SELECT login, nb_avertissement, est_bannie FROM utilisateur WHERE Id_utilisateur = ?",
+        [sig.Id_utilisateur_1]
+      );
+
+      sig.emplacement_libelle  = emplacements[0].libelle;
+      sig.code_postal          = emplacements[0].code_postal;
+      sig.citoyen_login        = utilisateurs[0].login;
+      sig.nb_avertissement     = utilisateurs[0].nb_avertissement;
+      sig.est_bannie           = utilisateurs[0].est_bannie;
+    }
+
+    res.json(signalements);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Erreur SQL" });
+  }
+});
+
+//------------------------------------------------------------------------
+// POST /signalement/creer : crée un nouveau signalement pour un emplacement
 app.post('/signalement/creer', authMiddleware, async (req, res) => {
   const { text, Id_emplacement } = req.body;
-  if (!text || !Id_emplacement)
+
+  if (!text || !Id_emplacement) {
     return res.status(400).json({ success: false, message: "Texte et emplacement requis" });
+  }
 
   const Id_utilisateur_1 = req.user.Id_utilisateur;
 
   try {
     const admins = await query("SELECT Id_utilisateur FROM admin LIMIT 1");
-    if (admins.length === 0)
+
+    if (admins.length === 0) {
       return res.status(500).json({ success: false, message: "Aucun admin disponible" });
+    }
 
     const Id_admin = admins[0].Id_utilisateur;
 
     const result = await query(
-      `INSERT INTO signalement (text, evalutaion, date_, Id_utilisateur, Id_emplacement, Id_utilisateur_1) VALUES (?, NULL, NOW(), ?, ?, ?)`,
+      `INSERT INTO signalement (text, evalutaion, date_, Id_utilisateur, Id_emplacement, Id_utilisateur_1)
+       VALUES (?, NULL, NOW(), ?, ?, ?)`,
       [text, Id_admin, Id_emplacement, Id_utilisateur_1]
     );
 
@@ -119,134 +237,229 @@ app.post('/signalement/creer', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/utilisateur/conducteur', authMiddleware, async (req, res) => {
-  try { res.json(await query("SELECT * FROM conducteur")); }
-  catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
-});
-
-app.get('/utilisateur/admin', authMiddleware, adminMiddleware, async (req, res) => {
-  try { res.json(await query("SELECT * FROM admin")); }
-  catch { res.status(500).json({ success: false, message: "Erreur SQL" }); }
-});
-
-// ─── GET /signalement ─────────────────────────────────────────────────────────
-app.get('/signalement', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const sql = `
-      SELECT s.Id_signalement, s.text, s.evalutaion, s.date_,
-             s.Id_emplacement, s.Id_utilisateur_1,
-             e.libelle AS emplacement_libelle, e.code_postal,
-             u.login   AS citoyen_login, u.nb_avertissement, u.est_bannie
-      FROM signalement s
-      JOIN emplacement  e ON s.Id_emplacement   = e.Id_emplacement
-      JOIN utilisateur  u ON s.Id_utilisateur_1 = u.Id_utilisateur
-      ORDER BY s.date_ DESC
-    `;
-    res.json(await query(sql));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Erreur SQL" });
-  }
-});
-
-// ─── POST /signalement/valider ────────────────────────────────────────────────
+//-----------------------------------------------------------------------------------
+// POST /signalement/valider : valide un signalement et réduit les avertissements (admin requis)
 app.post('/signalement/valider', authMiddleware, adminMiddleware, async (req, res) => {
   const { id_signalement } = req.body;
-  if (!id_signalement) return res.status(400).json({ success: false, message: "id_signalement manquant" });
+
+  if (!id_signalement) {
+    return res.status(400).json({ success: false, message: "id_signalement manquant" });
+  }
+
   try {
-    const [sig] = await query("SELECT * FROM signalement WHERE Id_signalement = ?", [id_signalement]);
-    if (!sig) return res.status(404).json({ success: false, message: "Signalement introuvable" });
-    await query("UPDATE signalement SET evalutaion = 1 WHERE Id_signalement = ?", [id_signalement]);
-    await query(`UPDATE utilisateur SET nb_avertissement = GREATEST(0, CAST(nb_avertissement AS SIGNED) - 1) WHERE Id_utilisateur = ?`, [sig.Id_utilisateur_1]);
-    const [user] = await query("SELECT nb_avertissement, est_bannie FROM utilisateur WHERE Id_utilisateur = ?", [sig.Id_utilisateur_1]);
-    res.json({ success: true, message: "Signalement validé ✔", user });
+    const signalements = await query(
+      "SELECT * FROM signalement WHERE Id_signalement = ?",
+      [id_signalement]
+    );
+
+    if (signalements.length === 0) {
+      return res.status(404).json({ success: false, message: "Signalement introuvable" });
+    }
+
+    const sig = signalements[0];
+
+    await query(
+      "UPDATE signalement SET evalutaion = 1 WHERE Id_signalement = ?",
+      [id_signalement]
+    );
+
+    await query(
+      `UPDATE utilisateur SET nb_avertissement = GREATEST(0, CAST(nb_avertissement AS SIGNED) - 1)
+       WHERE Id_utilisateur = ?`,
+      [sig.Id_utilisateur_1]
+    );
+
+    const utilisateurs = await query(
+      "SELECT nb_avertissement, est_bannie FROM utilisateur WHERE Id_utilisateur = ?",
+      [sig.Id_utilisateur_1]
+    );
+
+    res.json({ success: true, message: "Signalement validé ✔", user: utilisateurs[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Erreur SQL" });
   }
 });
 
-// ─── POST /signalement/rejeter ────────────────────────────────────────────────
+//---------------------------------------------------------------------
+// POST /signalement/rejeter : rejette un signalement et ajoute un avertissement (admin requis)
 app.post('/signalement/rejeter', authMiddleware, adminMiddleware, async (req, res) => {
   const { id_signalement } = req.body;
-  if (!id_signalement) return res.status(400).json({ success: false, message: "id_signalement manquant" });
+
+  if (!id_signalement) {
+    return res.status(400).json({ success: false, message: "id_signalement manquant" });
+  }
+
   try {
-    const [sig] = await query("SELECT * FROM signalement WHERE Id_signalement = ?", [id_signalement]);
-    if (!sig) return res.status(404).json({ success: false, message: "Signalement introuvable" });
-    await query("UPDATE signalement SET evalutaion = 0 WHERE Id_signalement = ?", [id_signalement]);
-    await query(`UPDATE utilisateur SET nb_avertissement = CAST(nb_avertissement AS SIGNED) + 1 WHERE Id_utilisateur = ?`, [sig.Id_utilisateur_1]);
-    await query(`UPDATE utilisateur SET est_bannie = 1 WHERE Id_utilisateur = ? AND CAST(nb_avertissement AS SIGNED) >= 5`, [sig.Id_utilisateur_1]);
-    const [user] = await query("SELECT nb_avertissement, est_bannie FROM utilisateur WHERE Id_utilisateur = ?", [sig.Id_utilisateur_1]);
-    res.json({
-      success: true,
-      message: user.est_bannie ? `Utilisateur banni (${user.nb_avertissement} avert.)` : `+1 avertissement (${user.nb_avertissement}/5)`,
-      user
-    });
+    const signalements = await query(
+      "SELECT * FROM signalement WHERE Id_signalement = ?",
+      [id_signalement]
+    );
+
+    if (signalements.length === 0) {
+      return res.status(404).json({ success: false, message: "Signalement introuvable" });
+    }
+
+    const sig = signalements[0];
+
+    await query(
+      "UPDATE signalement SET evalutaion = 0 WHERE Id_signalement = ?",
+      [id_signalement]
+    );
+
+    await query(
+      `UPDATE utilisateur SET nb_avertissement = CAST(nb_avertissement AS SIGNED) + 1
+       WHERE Id_utilisateur = ?`,
+      [sig.Id_utilisateur_1]
+    );
+
+    await query(
+      `UPDATE utilisateur SET est_bannie = 1
+       WHERE Id_utilisateur = ? AND CAST(nb_avertissement AS SIGNED) >= 5`,
+      [sig.Id_utilisateur_1]
+    );
+
+    const utilisateurs = await query(
+      "SELECT nb_avertissement, est_bannie FROM utilisateur WHERE Id_utilisateur = ?",
+      [sig.Id_utilisateur_1]
+    );
+
+    const user = utilisateurs[0];
+
+    let message = "";
+    if (user.est_bannie) {
+      message = `Utilisateur banni (${user.nb_avertissement} avert.)`;
+    } else {
+      message = `+1 avertissement (${user.nb_avertissement}/5)`;
+    }
+
+    res.json({ success: true, message, user });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Erreur SQL" });
   }
 });
 
-// ─── GET /conducteur/transferts/:id ──────────────────────────────────────────
+//-----------------------------------------------------------------------------
+// GET /conducteur/transferts/:id : retourne les transferts d'un conducteur
 app.get('/conducteur/transferts/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  if (req.user.Id_utilisateur != id && !req.user.isAdmin)
+
+  if (req.user.Id_utilisateur != id && !req.user.isAdmin) {
     return res.status(403).json({ success: false, message: "Accès refusé" });
+  }
+
   try {
-    const sql = `
-      SELECT t.Id_transfert, t.date_demande, t.date_debut, t.date_fin,
-        CASE WHEN t.date_fin IS NOT NULL THEN 'terminé'
-             WHEN t.date_debut <= NOW()  THEN 'en cours'
-             ELSE 'en attente' END AS statut,
-        v.matricule, v.type_vehicule, v.capacite_kg, v.capacite_m2,
-        c.Id_centre, c.adresse AS centre_adresse, c.ville AS centre_ville,
-        c.code_postal AS centre_code_postal,
-        c.latitude AS centre_latitude, c.longitude AS centre_longitude
-      FROM transfert t
-      JOIN vehicule          v ON t.matricule = v.matricule
-      JOIN centre_traitement c ON t.Id_centre = c.Id_centre
-      WHERE t.Id_utilisateur = ?
-      ORDER BY CASE WHEN t.date_fin IS NOT NULL THEN 2 WHEN t.date_debut <= NOW() THEN 0 ELSE 1 END, t.date_debut DESC
-    `;
-    res.json(await query(sql, [id]));
+    const transferts = await query(
+      `SELECT Id_transfert, date_demande, date_debut, date_fin, matricule, Id_centre
+       FROM transfert
+       WHERE Id_utilisateur = ?
+       ORDER BY
+         CASE WHEN date_fin IS NOT NULL THEN 2 WHEN date_debut <= NOW() THEN 0 ELSE 1 END,
+         date_debut DESC`,
+      [id]
+    );
+
+    for (let i = 0; i < transferts.length; i++) {
+      const t = transferts[i];
+
+      // Calcul du statut
+      if (t.date_fin !== null) {
+        t.statut = 'terminé';
+      } else if (t.date_debut <= new Date()) {
+        t.statut = 'en cours';
+      } else {
+        t.statut = 'en attente';
+      }
+
+      // Récupération du véhicule
+      const vehicules = await query(
+        "SELECT matricule, type_vehicule, capacite_kg, capacite_m2 FROM vehicule WHERE matricule = ?",
+        [t.matricule]
+      );
+      t.vehicule = vehicules[0];
+
+      // Récupération du centre de traitement
+      const centres = await query(
+        `SELECT Id_centre, adresse AS centre_adresse, ville AS centre_ville,
+                code_postal AS centre_code_postal, latitude AS centre_latitude, longitude AS centre_longitude
+         FROM centre_traitement WHERE Id_centre = ?`,
+        [t.Id_centre]
+      );
+      t.centre = centres[0];
+    }
+
+    res.json(transferts);
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Erreur SQL", detail: err.message });
   }
 });
 
-// ─── GET /transferts/all ──────────────────────────────────────────────────────
+//------------------------------------------------------------------------------------
+// GET /transferts/all : retourne tous les transferts avec détails conducteur (admin requis)
 app.get('/transferts/all', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const sql = `
-      SELECT t.Id_transfert, t.date_demande, t.date_debut, t.date_fin,
-        CASE WHEN t.date_fin IS NOT NULL THEN 'terminé'
-             WHEN t.date_debut <= NOW()  THEN 'en cours'
-             ELSE 'en attente' END AS statut,
-        v.matricule, v.type_vehicule, v.capacite_kg, v.capacite_m2,
-        c.Id_centre, c.adresse AS centre_adresse, c.ville AS centre_ville,
-        c.code_postal AS centre_code_postal,
-        c.latitude AS centre_latitude, c.longitude AS centre_longitude,
-        u.login AS conducteur_login
-      FROM transfert t
-      JOIN vehicule          v ON t.matricule      = v.matricule
-      JOIN centre_traitement c ON t.Id_centre      = c.Id_centre
-      JOIN utilisateur       u ON t.Id_utilisateur = u.Id_utilisateur
-      ORDER BY CASE WHEN t.date_fin IS NOT NULL THEN 2 WHEN t.date_debut <= NOW() THEN 0 ELSE 1 END, t.date_debut DESC
-    `;
-    res.json(await query(sql));
+    const transferts = await query(
+      `SELECT Id_transfert, date_demande, date_debut, date_fin, matricule, Id_centre, Id_utilisateur
+       FROM transfert
+       ORDER BY
+         CASE WHEN date_fin IS NOT NULL THEN 2 WHEN date_debut <= NOW() THEN 0 ELSE 1 END,
+         date_debut DESC`
+    );
+
+    for (let i = 0; i < transferts.length; i++) {
+      const t = transferts[i];
+
+      // Calcul du statut
+      if (t.date_fin !== null) {
+        t.statut = 'terminé';
+      } else if (t.date_debut <= new Date()) {
+        t.statut = 'en cours';
+      } else {
+        t.statut = 'en attente';
+      }
+
+      // Récupération du véhicule
+      const vehicules = await query(
+        "SELECT matricule, type_vehicule, capacite_kg, capacite_m2 FROM vehicule WHERE matricule = ?",
+        [t.matricule]
+      );
+      t.vehicule = vehicules[0];
+
+      // Récupération du centre de traitement
+      const centres = await query(
+        `SELECT Id_centre, adresse AS centre_adresse, ville AS centre_ville,
+                code_postal AS centre_code_postal, latitude AS centre_latitude, longitude AS centre_longitude
+         FROM centre_traitement WHERE Id_centre = ?`,
+        [t.Id_centre]
+      );
+      t.centre = centres[0];
+
+      // Récupération du login du conducteur
+      const utilisateurs = await query(
+        "SELECT login FROM utilisateur WHERE Id_utilisateur = ?",
+        [t.Id_utilisateur]
+      );
+      t.conducteur_login = utilisateurs[0].login;
+    }
+
+    res.json(transferts);
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Erreur SQL" });
   }
 });
 
-// ─── POST /emplacement/ajouter ────────────────────────────────────────────────
+//----------------------------------------------------------------------
+// POST /emplacement/ajouter : ajoute un nouvel emplacement (admin requis)
 app.post('/emplacement/ajouter', authMiddleware, adminMiddleware, async (req, res) => {
   const { libelle, code_postal, latitude, longitude } = req.body;
-  if (!libelle || !code_postal || latitude == null || longitude == null)
+
+  if (!libelle || !code_postal || latitude == null || longitude == null) {
     return res.status(400).json({ success: false, message: "Champs manquants" });
+  }
+
   try {
     const result = await query(
       "INSERT INTO emplacement (code_postal, libelle, latitude, longitude) VALUES (?, ?, ?, ?)",
@@ -259,11 +472,15 @@ app.post('/emplacement/ajouter', authMiddleware, adminMiddleware, async (req, re
   }
 });
 
-// ─── POST /contenant/ajouter ──────────────────────────────────────────────────
+//-----------------------------------------------------------------------------------
+// POST /contenant/ajouter : crée un nouveau contenant et l'assigne à un emplacement (admin requis)
 app.post('/contenant/ajouter', authMiddleware, adminMiddleware, async (req, res) => {
   const { capacite_kg, poids_actuel_kg, Id_type_dechet, Id_emplacement, scelle } = req.body;
-  if (!capacite_kg || !Id_type_dechet || !Id_emplacement)
+
+  if (!capacite_kg || !Id_type_dechet || !Id_emplacement) {
     return res.status(400).json({ success: false, message: "Champs manquants" });
+  }
+
   try {
     const result = await query(
       `INSERT INTO contenant (capacite_kg, poids_actuel_kg, scelle, date_creation, Id_type_dechet, Id_emplacement)
@@ -277,13 +494,20 @@ app.post('/contenant/ajouter', authMiddleware, adminMiddleware, async (req, res)
   }
 });
 
-// ─── POST /contenant/assigner ─────────────────────────────────────────────────
+//------------------------------------------------------------------------
+// POST /contenant/assigner : réassigne un contenant à un emplacement (admin requis)
 app.post('/contenant/assigner', authMiddleware, adminMiddleware, async (req, res) => {
   const { Id_contenant, Id_emplacement } = req.body;
-  if (!Id_contenant || !Id_emplacement)
+
+  if (!Id_contenant || !Id_emplacement) {
     return res.status(400).json({ success: false, message: "Champs manquants" });
+  }
+
   try {
-    await query("UPDATE contenant SET Id_emplacement = ? WHERE Id_contenant = ?", [Id_emplacement, Id_contenant]);
+    await query(
+      "UPDATE contenant SET Id_emplacement = ? WHERE Id_contenant = ?",
+      [Id_emplacement, Id_contenant]
+    );
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -291,24 +515,52 @@ app.post('/contenant/assigner', authMiddleware, adminMiddleware, async (req, res
   }
 });
 
-// ─── POST /remplirpoubelle ────────────────────────────────────────────────────
+//---------------------------------------------------------------
+// POST /remplirpoubelle : incrémente le poids d'un contenant de 10 kg
 app.post('/remplirpoubelle', authMiddleware, async (req, res) => {
   const { id } = req.body;
-  if (!id) return res.status(400).json({ success: false, message: "ID manquant" });
+
+  if (!id) {
+    return res.status(400).json({ success: false, message: "ID manquant" });
+  }
+
   try {
-    const [contenant] = await query("SELECT * FROM contenant WHERE Id_contenant = ?", [id]);
-    if (!contenant) return res.status(404).json({ success: false, message: "Contenant introuvable" });
-    const nouveauPoids = Math.min(parseFloat(contenant.poids_actuel_kg) + 10, parseFloat(contenant.capacite_kg));
-    await query("UPDATE contenant SET poids_actuel_kg = ? WHERE Id_contenant = ?", [nouveauPoids, id]);
-    res.json({ success: true, poids_actuel_kg: nouveauPoids, capacite_kg: contenant.capacite_kg, plein: nouveauPoids >= contenant.capacite_kg });
+    const contenants = await query(
+      "SELECT * FROM contenant WHERE Id_contenant = ?",
+      [id]
+    );
+
+    if (contenants.length === 0) {
+      return res.status(404).json({ success: false, message: "Contenant introuvable" });
+    }
+
+    const contenant = contenants[0];
+
+    const nouveauPoids = Math.min(
+      parseFloat(contenant.poids_actuel_kg) + 10,
+      parseFloat(contenant.capacite_kg)
+    );
+
+    await query(
+      "UPDATE contenant SET poids_actuel_kg = ? WHERE Id_contenant = ?",
+      [nouveauPoids, id]
+    );
+
+    res.json({
+      success: true,
+      poids_actuel_kg: nouveauPoids,
+      capacite_kg: contenant.capacite_kg,
+      plein: nouveauPoids >= contenant.capacite_kg
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: "Erreur SQL" });
   }
 });
 
-// ─── POST /login ──────────────────────────────────────────────────────────────
+//------------------------------------------------------------------------------------
+// POST /login : authentifie un utilisateur et retourne un token JWT
 app.post('/login', async (req, res) => {
-  const ip    = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'inconnue';
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'inconnue';
   const { login, password } = req.body;
 
   if (!login || !password) {
@@ -336,19 +588,28 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: "Compte banni" });
     }
 
-    const adminCheck      = await query("SELECT * FROM admin      WHERE Id_utilisateur = ?", [user.Id_utilisateur]);
-    const conducteurCheck = await query("SELECT * FROM conducteur WHERE Id_utilisateur = ?", [user.Id_utilisateur]);
+    const adminCheck      = await query(
+      "SELECT * FROM admin WHERE Id_utilisateur = ?",
+      [user.Id_utilisateur]
+    );
+    const conducteurCheck = await query(
+      "SELECT * FROM conducteur WHERE Id_utilisateur = ?",
+      [user.Id_utilisateur]
+    );
+
     const isAdmin      = adminCheck.length > 0;
     const isConducteur = conducteurCheck.length > 0;
 
-    // Génère le JWT
-    const payload = {
-      Id_utilisateur: user.Id_utilisateur,
-      login:          user.login,
-      isAdmin,
-      isConducteur
-    };
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const token = jwt.sign(
+      {
+        Id_utilisateur: user.Id_utilisateur,
+        login:          user.login,
+        isAdmin,
+        isConducteur
+      },
+      JWT_SECRET,
+      { expiresIn: "10m" }
+    );
 
     logConnexion({ ip, login, success: true, raison: "OK" });
 
@@ -362,23 +623,35 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// ─── POST /auth/refresh ───────────────────────────────────────────────────────
-// Renouvelle le token si encore valide → remet le compteur à 10 min
+//---------------------------------------------------------------------
+// POST /auth/refresh : renouvelle le token JWT d'une session active
 app.post('/auth/refresh', authMiddleware, async (req, res) => {
   try {
     const { Id_utilisateur, login, isAdmin, isConducteur } = req.user;
-    const newToken = jwt.sign({ Id_utilisateur, login, isAdmin, isConducteur }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+
+    const newToken = jwt.sign(
+      { Id_utilisateur, login, isAdmin, isConducteur },
+      JWT_SECRET,
+      { expiresIn: "10m" }
+    );
+
     res.json({ success: true, token: newToken });
   } catch (err) {
     res.status(500).json({ success: false, message: "Erreur" });
   }
 });
 
-// ─── POST /register ───────────────────────────────────────────────────────────
+//--------------------------------------------------------------------------
+// POST /register : crée un nouveau compte utilisateur
 app.post('/register', async (req, res) => {
   const { login, password, icon } = req.body;
-  if (!login || !password) return res.status(400).json({ success: false, message: "Champs manquants" });
+
+  if (!login || !password) {
+    return res.status(400).json({ success: false, message: "Champs manquants" });
+  }
+
   const passwordHash = sha256(password + getSalt());
+
   try {
     await query(
       "INSERT INTO utilisateur (icon, login, password, nb_avertissement, est_bannie) VALUES (?, ?, ?, ?, ?)",
@@ -386,11 +659,14 @@ app.post('/register', async (req, res) => {
     );
     res.json({ success: true, message: "Compte créé" });
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: "Login déjà utilisé" });
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, message: "Login déjà utilisé" });
+    }
     console.error(err);
     res.status(500).json({ success: false, message: "Erreur création compte" });
   }
 });
 
-// ─── START ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`✅  Serveur démarré sur http://localhost:${PORT}`));
+//------------------------------------------------------------------
+// Démarrage du serveur sur le port 3000
+app.listen(3000, () => console.log("Serveur démarré sur http://localhost:3000"));
