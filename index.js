@@ -55,7 +55,7 @@ function query(sql, params = []) {
 }
 
 //------------------------------------------------------------------------------
-// Middleware JWT : vérification du token Bearer dans les headers
+//  JWT : vérification du token 
 function authMiddleware(req, res, next) {
   const header = req.headers['authorization'];
 
@@ -667,6 +667,27 @@ app.post('/register', async (req, res) => {
   }
 });
 
+
+
+//--------------------------------------------------------------------------
+
+// GET / : page de statut du serveur
+app.get('/', (req, res) => {
+  res.send(`
+  <p > Serveur opérationnel </p>
+`);
+});
+
+
+
+
+
+
 //------------------------------------------------------------------
-// Démarrage du serveur sur le port 3000
-app.listen(3000, () => console.log("Serveur démarré sur http://localhost:3000"));
+//  Test demarrage
+const HOST = process.env.HOST || process.env.IP || "0.0.0.0";
+const PORT = parseInt(process.env.PORT) || 3000;
+
+app.listen(PORT, HOST, () => {
+  console.log(`Serveur démarré sur http://${HOST}:${PORT}`);
+});
