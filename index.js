@@ -677,16 +677,20 @@ app.get('/', (req, res) => {
   <p > Serveur opérationnel </p>
 `);
 });
-
+                                                                                                                                                               
 
 
 
 
 
 //------------------------------------------------------------------
-//  Test demarrage
-const HOST = process.env.HOST || process.env.IP || "0.0.0.0";
-const PORT = parseInt(process.env.PORT) || 3000;
+//  Test demarrage Pour alwyas data et en localk
+//const HOST = process.env.HOST ;
+const HOST = "localhost";
+
+//const PORT = parseInt(process.env.PORT);
+const PORT = 3000;
+
 
 app.listen(PORT, HOST, () => {
   console.log(`Serveur démarré sur http://${HOST}:${PORT}`);
